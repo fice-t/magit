@@ -1915,7 +1915,8 @@ selects a valid group of diff related sections, the type of these
 sections, i.e. `hunks' or `files'.  If SECTION, or if that is nil
 the current section, is a `hunk' section; and the region region
 starts and ends inside the body of a that section, then the type
-is `region'.
+is `region'.  If the region is empty after a mouse click, then
+`hunk' is returned instead of `region'.
 
 If optional STRICT is non-nil then return nil if the diff type of
 the section at point is `untracked' or the section at point is not
@@ -1930,7 +1931,7 @@ actually a `diff' but a `diffstat' section."
                                  'diffstat)))))
       (pcase (list (magit-section-type section)
                    (and siblings t)
-                   (and (region-active-p) t)
+                   (magit-diff-use-hunk-region-p)
                    ssection)
         (`(hunk nil   t  ,_)
          (if (magit-section-internal-region-p section) 'region 'hunk))
@@ -1940,6 +1941,21 @@ actually a `diff' but a `diffstat' section."
         (`(file  ,_  ,_  ,_) 'file)
         (`(,(or `staged `unstaged `untracked)
            nil ,_ ,_) 'list)))))
+
+(defun magit-diff-use-hunk-region-p ()
+  ;; (message "%s %s" this-command last-command)
+  (and (region-active-p)
+       (not (and (if (version< emacs-version "25.1")
+                     (eq this-command 'mouse-drag-region)
+                   ;; TODO implement this from first principals
+                   ;; currently it's trial-and-error
+                   (or (eq this-command 'mouse-drag-region)
+                       (eq last-command 'mouse-drag-region)
+                       ;; When another window was previously
+                       ;; selected then the last-command is
+                       ;; some byte-code function.
+                       (byte-code-function-p last-command)))
+                 (eq (region-end) (region-beginning))))))
 
 ;;; Diff Highlight
 
@@ -1964,11 +1980,13 @@ are highlighted."
              t)
     (-when-let (scope (magit-diff-scope section t))
       (cond ((eq scope 'region)
+             ;; (message "REGION")
              (magit-diff-paint-hunk section selection t))
             (selection
              (dolist (section selection)
                (magit-diff-highlight-recursive section selection)))
             (t
+             ;; (message "NORMAL")
              (magit-diff-highlight-recursive section)))
       t)))
 
@@ -2136,19 +2154,13 @@ are highlighted."
                   (line-end-position)))
 
 (defun magit-diff-update-hunk-region (section)
-  (when (and (eq (magit-diff-scope section t) 'region)
-             (not (and (if (version< emacs-version "25.1")
-                           (eq this-command 'mouse-drag-region)
-                         (or (eq last-command 'mouse-drag-region)
-                             ;; When another window was previously
-                             ;; selected then the last-command is
-                             ;; a byte-code function.
-                             (byte-code-function-p last-command)))
-                       (eq (region-end) (region-beginning)))))
-    (if (window-system)
-        (funcall magit-diff-highlight-hunk-region-function section)
-      ;; The overlay and underline variants are not compatible.
-      (magit-diff-highlight-hunk-region-using-face section))))
+  (if (eq (magit-diff-scope section t) 'region)
+      (if (window-system)
+          (funcall magit-diff-highlight-hunk-region-function section)
+        ;; The overlay and underline variants are not compatible.
+        (magit-diff-highlight-hunk-region-using-face section))
+    ;; Prevent flashing of the header on down-mouse-1.
+    (magit-region-sections)))
 
 (defun magit-diff-highlight-hunk-region-common (section)
   "TODO"
